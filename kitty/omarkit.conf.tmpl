@@ -1,22 +1,25 @@
 # omarkit.conf — include at the END of kitty.conf
-#
-# Bindings use kitty_mod — set it in your kitty.conf before this include:
-#   kitty_mod ctrl
-#
-# Default direction keys are arrows. Shadow in your kitty.conf to remap:
-#   map ctrl+h kitten /path/to/smart_close.py
 
 # ── Close ──────────────────────────────────────────────────────────────────
-map kitty_mod+w         kitten {{PLUGIN_DIR}}/kitty/smart_close.py
-map kitty_mod+shift+w   kitten {{PLUGIN_DIR}}/kitty/smart_close.py --all
+map ctrl+w         kitten {{PLUGIN_DIR}}/kitty/smart_close.py
+map ctrl+shift+w   kitten {{PLUGIN_DIR}}/kitty/smart_close.py --all
 
 # ── Resize ─────────────────────────────────────────────────────────────────
-map alt+kitty_mod+down  kitten {{PLUGIN_DIR}}/kitty/relative_resize.py down 5
-map alt+kitty_mod+up    kitten {{PLUGIN_DIR}}/kitty/relative_resize.py up   5
+map alt+ctrl+down  kitten {{PLUGIN_DIR}}/kitty/relative_resize.py down 5
+map alt+ctrl+up    kitten {{PLUGIN_DIR}}/kitty/relative_resize.py up   5
 
-# Unset resize when nvim is focused — nvim handles these itself
-map --when-focus-on var:IS_NVIM alt+kitty_mod+down
-map --when-focus-on var:IS_NVIM alt+kitty_mod+up
-
-# ── Nvim passthrough ────────────────────────────────────────────────────────
-map --when-focus-on var:IS_NVIM kitty_mod+semicolon send_key kitty_mod+semicolon
+# ── Passthrough: unset kitty ctrl+* bindings per focused app ───────────────
+# ctrl+w (smart_close) intentionally kept for all apps.
+# Add IS_* conditions here to unset specific bindings per app type.
+map --when-focus-on var:IS_NVIM alt+ctrl+down
+map --when-focus-on var:IS_NVIM alt+ctrl+up
+map --when-focus-on var:IS_NVIM ctrl+semicolon
+map --when-focus-on var:IS_NVIM ctrl+y
+map --when-focus-on var:IS_NVIM ctrl+k
+map --when-focus-on var:IS_NVIM ctrl+s
+map --when-focus-on var:IS_NVIM ctrl+l
+map --when-focus-on var:IS_NVIM ctrl+d
+map --when-focus-on var:IS_NVIM ctrl+a
+map --when-focus-on var:IS_NVIM ctrl+e
+map --when-focus-on var:IS_NVIM ctrl+t
+map --when-focus-on var:IS_NVIM ctrl+enter

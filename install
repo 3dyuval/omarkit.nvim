@@ -30,17 +30,18 @@ DOWN="${3:-$DOWN}"
 UP="${4:-$UP}"
 RIGHT="${5:-$RIGHT}"
 
-# Upsert OMARKIT_* vars into envs.conf
+# Write OMARKIT_* vars into envs.conf (strip old values, append fresh)
 touch "$ENVS_CONF"
-for var_val in "OMARKIT_MOD=$MOD" "OMARKIT_MOD2=$MOD2" "OMARKIT_MOD3=$MOD3" "OMARKIT_LEFT=$LEFT" "OMARKIT_DOWN=$DOWN" "OMARKIT_UP=$UP" "OMARKIT_RIGHT=$RIGHT"; do
-  var="${var_val%%=*}"
-  val="${var_val#*=}"
-  if grep -q "^\$$var = " "$ENVS_CONF" 2>/dev/null; then
-    sed -i "s|^\$$var = .*|\$$var = $val|" "$ENVS_CONF"
-  else
-    echo "\$$var = $val" >> "$ENVS_CONF"
-  fi
-done
+grep -v '^\$OMARKIT_' "$ENVS_CONF" > "${ENVS_CONF}.tmp" && mv "${ENVS_CONF}.tmp" "$ENVS_CONF"
+cat >> "$ENVS_CONF" << VARS
+\$OMARKIT_MOD  = $MOD
+\$OMARKIT_MOD2 = $MOD2
+\$OMARKIT_MOD3 = $MOD3
+\$OMARKIT_LEFT = $LEFT
+\$OMARKIT_DOWN = $DOWN
+\$OMARKIT_UP   = $UP
+\$OMARKIT_RIGHT = $RIGHT
+VARS
 echo "updated $ENVS_CONF"
 
 # Render omarkit.conf from template
@@ -150,3 +151,6 @@ MIGRATION
 chmod +x "$migration_file"
 echo "created migration: $migration_file"
 nvim "$migration_file"
+
+omarchy-refresh-waybar 2>/dev/null || true
+echo "refreshed waybar"
