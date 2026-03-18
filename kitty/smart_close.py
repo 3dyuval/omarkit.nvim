@@ -1,7 +1,5 @@
-import glob as _glob
 import os
 import signal
-import subprocess
 
 from kitty.options.utils import parse_key_action
 
@@ -22,36 +20,7 @@ _BUSY_DIR = os.path.join(
 def _claude_is_busy():
     if not os.path.isdir(_BUSY_DIR):
         return False
-    for pid_file in _glob.glob(os.path.join(_BUSY_DIR, '*')):
-        try:
-            pid = int(os.path.basename(pid_file))
-            os.kill(pid, 0)  # raises OSError if process is dead
-            return True
-        except ValueError:
-            # Non-PID filename — stale file with wid/sock metadata
-            try:
-                with open(pid_file) as fh:
-                    lines = fh.read().splitlines()
-                wid = lines[0] if lines else ''
-                sock = lines[1] if len(lines) > 1 else ''
-                if wid and sock:
-                    subprocess.Popen(
-                        ['kitty', '@', '--to', sock, 'set-tab-color',
-                         '--match', f'id:{wid}',
-                         'active_bg=NONE', 'active_fg=NONE',
-                         'inactive_bg=NONE'],
-                        stderr=subprocess.DEVNULL,
-                    )
-                os.unlink(pid_file)
-            except OSError:
-                pass
-        except OSError:
-            # Process is dead — clean up stale PID file
-            try:
-                os.unlink(pid_file)
-            except OSError:
-                pass
-    return False
+    return bool(os.listdir(_BUSY_DIR))
 
 
 def _foreground_non_shell(window):
