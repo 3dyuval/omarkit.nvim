@@ -15,13 +15,28 @@ local function set_is_nvim(value)
   io.flush()
 end
 
---- Navigate in direction via wincmd; fall back to hyprctl at nvim split edge.
+local SOCK_PATH = (os.getenv('XDG_RUNTIME_DIR') or ('/run/user/' .. vim.fn.getuid())) .. '/omarchy-nav.sock'
+
+--- Write direction to daemon socket (async, fire-and-forget).
+--- Falls back to hyprctl if socket is unavailable.
+local function dispatch_edge(direction)
+  local pipe = vim.uv.new_pipe(false)
+  pipe:connect(SOCK_PATH, function(err)
+    if err then
+      vim.fn.jobstart({ 'hyprctl', 'dispatch', 'movefocus', direction })
+    else
+      pipe:write(direction .. '\n', function() pipe:close() end)
+    end
+  end)
+end
+
+--- Navigate in direction via wincmd; dispatch to daemon at nvim split edge.
 local function nav(wincmd_dir, hypr_dir)
   return function()
     local win = vim.api.nvim_get_current_win()
     vim.cmd('wincmd ' .. wincmd_dir)
     if vim.api.nvim_get_current_win() == win then
-      vim.fn.jobstart({ 'hyprctl', 'dispatch', 'movefocus', hypr_dir })
+      dispatch_edge(hypr_dir)
     end
   end
 end
@@ -43,10 +58,10 @@ function M.setup(opts)
 
   local keys = require('omarkit.config').keys
   local nav_map = {
-    [keys.nav_left]  = { 'h', 'l', 'Window left' },
-    [keys.nav_down]  = { 'j', 'd', 'Window down' },
-    [keys.nav_up]    = { 'k', 'u', 'Window up' },
-    [keys.nav_right] = { 'l', 'r', 'Window right' },
+    [keys.nav_left]  = { 'h', 'left',  'Window left' },
+    [keys.nav_down]  = { 'j', 'down',  'Window down' },
+    [keys.nav_up]    = { 'k', 'up',    'Window up' },
+    [keys.nav_right] = { 'l', 'right', 'Window right' },
   }
   for lhs, spec in pairs(nav_map) do
     if lhs then

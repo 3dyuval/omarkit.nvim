@@ -1,0 +1,20 @@
+#!/bin/bash
+direction=${1:?direction required}
+
+declare -A HYPR_DIR=([left]=l [right]=r [up]=u [down]=d)
+
+SOCK="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/omarchy-nav.sock"
+PLUGIN_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+
+active_window=$(hyprctl activewindow -j 2>/dev/null)
+read -r active_class active_pid < <(echo "$active_window" | jq -r '[.class // empty, .pid // empty] | @tsv')
+
+if [[ "$active_class" == "kitty" ]]; then
+  if [[ -S "$SOCK" ]] && echo "$direction $active_pid" | socat - "UNIX-CONNECT:$SOCK" 2>/dev/null; then
+    exit 0
+  fi
+  # Fallback: direct Python if daemon is not running
+  python3 "$PLUGIN_DIR/kitty/omarchy_kitty.py" "$direction" "unix:@mykitty-$active_pid"
+else
+  hyprctl dispatch movefocus "${HYPR_DIR[$direction]}" >/dev/null
+fi
