@@ -1,0 +1,259 @@
+#!/bin/bash
+# omarchy-kitty — smart kitty launcher with Hyprland window targeting
+#
+# Usage: omarchy-kitty [--smart|--focus|--new|--tab|--pane] [--cwd DIR] [CMD...]
+#
+# NOTE: USE_REMOTE_CONTROL=false — opening a tab/pane in a specific existing
+# kitty instance via remote control is disabled (single @mykitty socket is
+# unreliable with multiple instances). All "launch in kitty" paths fall back
+# to a new OS window. Flip to true once socket targeting is fixed.
+
+# ── Feature flags ─────────────────────────────────────────────────────────────
+USE_REMOTE_CONTROL=false
+DEBUG=${DEBUG:-false}  # print all resolutions without executing
+
+# KEEP_SCREEN=true  — on kitty: prefer another kitty on the same screen first;
+#                     fall through to next screen if none.
+# KEEP_SCREEN=false — on kitty: always jump directly to next screen kitty.
+KEEP_SCREEN=true
+
+# ── Parse args ────────────────────────────────────────────────────────────────
+MODE=""
+TYPE="tab"
+CWD=""
+CMD=()
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --smart) MODE="smart"; shift ;;
+    --focus) MODE="focus"; shift ;;
+    --new)   MODE="new";   shift ;;
+    --tab)   TYPE="tab";   shift ;;
+    --pane)  TYPE="window"; shift ;;
+    --cwd)   CWD="$2"; shift 2 ;;
+    --)      shift; CMD=("$@"); break ;;
+    *)       CMD=("$@"); break ;;
+  esac
+done
+
+[[ -z "$MODE" && ${#CMD[@]} -gt 0 ]] && MODE="smart"
+[[ ${#CMD[@]} -eq 1 && -z "${CMD[0]}" ]] && CMD=()
+
+# ── Probe globals (set once, read everywhere) ─────────────────────────────────
+declare -g HYPR_OK=false MON_ID="" FOCUSED_CLASS="" FOCUSED_ADDR="" FOCUSED_PID=""
+declare -g KITTY_COUNT=0 CLIENTS_JSON="[]"
+declare -A KITTY_LABEL_MAP   # label → address
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
+CWD_ARGS=()
+[[ -n "$CWD" ]] && CWD_ARGS=(--cwd "$CWD")
+HOLD=()
+[[ ${#CMD[@]} -gt 0 && -n "${CMD[*]}" ]] && HOLD=(--hold)
+
+launch_new() {
+  if [[ "$DEBUG" == "true" ]]; then
+    echo "[DEBUG] launch_new: cwd=${CWD:-<inherit>} cmd=${CMD[*]:-<none>}"
+    return
+  fi
+  if [[ ${#CMD[@]} -gt 0 ]]; then
+    uwsm app -- kitty ${CWD:+--directory "$CWD"} "${HOLD[@]}" -e "${CMD[@]}"
+  else
+    uwsm app -- kitty ${CWD:+--directory "$CWD"}
+  fi
+}
+
+kitty_sock_for_pid() {
+  cat /proc/"$1"/environ 2>/dev/null | tr '\0' '\n' | grep '^KITTY_LISTEN_ON=' | cut -d= -f2-
+}
+
+launch_in_kitty() {
+  local sock="$1" t="${2:-$TYPE}"
+  if [[ ${#CMD[@]} -gt 0 ]]; then
+    kitty @ --to "$sock" launch --type="$t" "${CWD_ARGS[@]}" "${HOLD[@]}" "${CMD[@]}"
+  else
+    kitty @ --to "$sock" launch --type="$t" "${CWD_ARGS[@]}"
+  fi
+}
+
+# Open a tab/pane in the given kitty PID via remote control.
+# Falls back to a new OS window when USE_REMOTE_CONTROL=false or socket missing.
+# Callers should focus the target window first if needed.
+try_launch_in_kitty() {
+  local pid="$1" t="${2:-$TYPE}"
+  if [[ "$USE_REMOTE_CONTROL" == "true" ]]; then
+    local sock
+    sock=$(kitty_sock_for_pid "$pid")
+    if [[ "$DEBUG" == "true" ]]; then
+      echo "[DEBUG] try_launch_in_kitty: pid=$pid type=$t sock=${sock:-<not found>}"
+      return
+    fi
+    if [[ -n "$sock" ]]; then
+      launch_in_kitty "$sock" "$t"
+      return
+    fi
+  elif [[ "$DEBUG" == "true" ]]; then
+    echo "[DEBUG] try_launch_in_kitty: pid=$pid type=$t (remote control disabled → launch_new)"
+    return
+  fi
+  launch_new
+}
+
+focus_kitty() {
+  [[ -z "$1" ]] && return
+  if [[ "$DEBUG" == "true" ]]; then
+    echo "[DEBUG] focus_kitty: address=$1"
+  else
+    hyprctl dispatch focuswindow "address:$1" &>/dev/null
+  fi
+}
+
+# Last-focused kitty on a given monitor id (uses focusHistoryID from CLIENTS_JSON)
+last_kitty_on_monitor() {
+  echo "$CLIENTS_JSON" | jq -r --argjson mon "$1" \
+    '[.[] | select(.class == "kitty" and .monitor == $mon)] | sort_by(.focusHistoryID) | .[0].address // empty'
+}
+
+# ── PROBE — all hyprctl calls, no decisions ───────────────────────────────────
+probe() {
+  local monitors
+  monitors=$(hyprctl monitors -j 2>/dev/null) || return
+  [[ -z "$monitors" ]] && return
+  HYPR_OK=true
+
+  MON_ID=$(echo "$monitors" | jq -r '.[] | select(.focused == true).id')
+
+  local focused_win
+  focused_win=$(hyprctl activewindow -j)
+  FOCUSED_CLASS=$(echo "$focused_win" | jq -r '.class')
+  FOCUSED_ADDR=$(echo "$focused_win" | jq -r '.address')
+  FOCUSED_PID=$(echo "$focused_win" | jq -r '.pid')
+
+  CLIENTS_JSON=$(hyprctl clients -j)
+  KITTY_COUNT=$(echo "$CLIENTS_JSON" | jq '[.[] | select(.class == "kitty")] | length')
+
+  # Build label→address map for picker: "title [monitor:id]" → address
+  while IFS=$'\t' read -r label addr; do
+    KITTY_LABEL_MAP["$label"]="$addr"
+  done < <(echo "$CLIENTS_JSON" | jq -r \
+    '.[] | select(.class == "kitty") | "\(.title) [monitor:\(.monitor)]\t\(.address)"')
+
+  if [[ "$DEBUG" == "true" ]]; then
+    echo "[DEBUG] probe:"
+    echo "  HYPR_OK=$HYPR_OK"
+    echo "  MON_ID=$MON_ID"
+    echo "  FOCUSED_CLASS=$FOCUSED_CLASS"
+    echo "  FOCUSED_ADDR=$FOCUSED_ADDR"
+    echo "  FOCUSED_PID=$FOCUSED_PID"
+    echo "  KITTY_COUNT=$KITTY_COUNT"
+    echo "  KEEP_SCREEN=$KEEP_SCREEN"
+    echo "  USE_REMOTE_CONTROL=$USE_REMOTE_CONTROL"
+    echo "  MODE=$MODE TYPE=$TYPE CWD=${CWD:-<none>} CMD=${CMD[*]:-<none>}"
+    echo "  kitty windows:"
+    for label in "${!KITTY_LABEL_MAP[@]}"; do
+      echo "    ${KITTY_LABEL_MAP[$label]}  $label"
+    done
+    echo "  kitty focus order (by focusHistoryID):"
+    echo "$CLIENTS_JSON" | jq -r '[.[] | select(.class == "kitty")] | sort_by(.focusHistoryID) | .[] | "    [\(.focusHistoryID)] mon=\(.monitor) \(.address) \(.title)"'
+  fi
+}
+
+# ── ACT: --smart ──────────────────────────────────────────────────────────────
+act_smart() {
+  if [[ "$KITTY_COUNT" -eq 0 ]]; then
+    launch_new; return
+  fi
+
+  if [[ "$FOCUSED_CLASS" == "kitty" ]]; then
+    if [[ ${#CMD[@]} -gt 0 ]]; then
+      # Already on kitty with a command — open tab in it (or new window if remote disabled)
+      try_launch_in_kitty "$FOCUSED_PID" "$TYPE"
+    else
+      local target_addr=""
+
+      # KEEP_SCREEN=true: prefer another kitty on the same screen first
+      if [[ "$KEEP_SCREEN" == "true" ]]; then
+        target_addr=$(echo "$CLIENTS_JSON" | jq -r \
+          --argjson mon "$MON_ID" --arg cur "$FOCUSED_ADDR" '
+          [.[] | select(.class == "kitty" and .monitor == $mon and .address != $cur)] |
+          sort_by(.focusHistoryID) | .[0].address // empty
+        ')
+      fi
+
+      # Fall through (or KEEP_SCREEN=false): last-focused kitty on next screen
+      if [[ -z "$target_addr" ]]; then
+        target_addr=$(echo "$CLIENTS_JSON" | jq -r --argjson cur_mon "$MON_ID" '
+          [.[] | select(.class == "kitty" and .monitor != $cur_mon)] |
+          group_by(.monitor) |
+          map({monitor: .[0].monitor, addr: (sort_by(.focusHistoryID) | .[0].address)}) |
+          sort_by(.monitor) |
+          (map(select(.monitor > $cur_mon))[0] // .[0]).addr // empty
+        ')
+      fi
+
+      # Silent no-op when no other kitty exists anywhere — intentional,
+      # SUPER+RETURN on the only kitty has no action.
+      [[ -n "$target_addr" ]] && focus_kitty "$target_addr"
+    fi
+  else
+    # Not on kitty — focus last-focused kitty on current monitor, fall back to any
+    local target_addr
+    target_addr=$(last_kitty_on_monitor "$MON_ID")
+    [[ -z "$target_addr" ]] && target_addr=$(echo "$CLIENTS_JSON" | jq -r \
+      '[.[] | select(.class == "kitty")] | sort_by(.focusHistoryID) | .[0].address // empty')
+
+    if [[ -n "$target_addr" ]]; then
+      focus_kitty "$target_addr"
+      if [[ ${#CMD[@]} -gt 0 ]]; then
+        local target_pid
+        target_pid=$(echo "$CLIENTS_JSON" | jq -r --arg addr "$target_addr" \
+          '.[] | select(.address == $addr) | .pid')
+        try_launch_in_kitty "$target_pid" "$TYPE"
+      fi
+    else
+      launch_new
+    fi
+  fi
+}
+
+# ── ACT: --focus ──────────────────────────────────────────────────────────────
+act_focus() {
+  local first_addr
+  first_addr=$(echo "$CLIENTS_JSON" | jq -r \
+    '[.[] | select(.class == "kitty")][0].address // empty')
+  focus_kitty "$first_addr"
+}
+
+# ── ACT: picker (no mode) ─────────────────────────────────────────────────────
+act_picker() {
+  if [[ "$KITTY_COUNT" -eq 0 ]]; then
+    launch_new; return
+  fi
+
+  local target_addr=""
+
+  if [[ "$KITTY_COUNT" -eq 1 ]]; then
+    target_addr=$(echo "$CLIENTS_JSON" | jq -r \
+      '[.[] | select(.class == "kitty")][0].address')
+  else
+    local labels choice
+    labels=$(printf '%s\n' "${!KITTY_LABEL_MAP[@]}")
+    choice=$(echo "$labels" | walker -d -p "Select terminal:")
+    [[ -z "$choice" ]] && return
+    target_addr="${KITTY_LABEL_MAP[$choice]}"
+  fi
+
+  [[ -z "$target_addr" ]] && return
+  focus_kitty "$target_addr"
+  local target_pid
+  target_pid=$(echo "$CLIENTS_JSON" | jq -r --arg addr "$target_addr" \
+    '.[] | select(.address == $addr) | .pid')
+  try_launch_in_kitty "$target_pid" "$TYPE"
+}
+
+# ── DISPATCH ──────────────────────────────────────────────────────────────────
+case "$MODE" in
+  new)   launch_new ;;
+  smart) probe; "$HYPR_OK" && act_smart || launch_new ;;
+  focus) probe; "$HYPR_OK" && act_focus ;;
+  *)     probe; "$HYPR_OK" && act_picker || launch_new ;;
+esac

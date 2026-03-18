@@ -1,0 +1,99 @@
+#!/bin/bash
+# omarkit install
+# Usage: install [mod=ctrl] [left=h] [down=a] [up=e] [right=i]
+#
+# Renders omarkit.conf from template and creates a migration that:
+#   - adds `include omarkit.conf` to kitty.conf
+#   - registers exec-once for the nav daemon in hyprland.conf
+set -euo pipefail
+
+PLUGIN_DIR="$(cd "$(dirname "$0")" && pwd)"
+OMARCHY="$HOME/.local/share/omarchy"
+KITTY_CONF="$HOME/.config/kitty/kitty.conf"
+OUT_CONF="$HOME/.config/kitty/omarkit.conf"
+BIN_DIR="$HOME/.local/bin"
+ENVS_CONF="$HOME/.config/hypr/envs.conf"
+
+# Read from env (set by Hyprland from envs.conf on prior runs), else defaults
+MOD="${OMARKIT_MOD:-CTRL}"
+MOD2="${OMARKIT_MOD2:-SHIFT}"
+MOD3="${OMARKIT_MOD3:-ALT}"
+LEFT="${OMARKIT_LEFT:-left}"
+DOWN="${OMARKIT_DOWN:-down}"
+UP="${OMARKIT_UP:-up}"
+RIGHT="${OMARKIT_RIGHT:-right}"
+
+# CLI args override env vars
+MOD="${1:-$MOD}"
+LEFT="${2:-$LEFT}"
+DOWN="${3:-$DOWN}"
+UP="${4:-$UP}"
+RIGHT="${5:-$RIGHT}"
+
+# Upsert OMARKIT_* vars into envs.conf
+touch "$ENVS_CONF"
+for var_val in "OMARKIT_MOD=$MOD" "OMARKIT_MOD2=$MOD2" "OMARKIT_MOD3=$MOD3" "OMARKIT_LEFT=$LEFT" "OMARKIT_DOWN=$DOWN" "OMARKIT_UP=$UP" "OMARKIT_RIGHT=$RIGHT"; do
+  var="${var_val%%=*}"
+  val="${var_val#*=}"
+  if grep -q "^\$$var = " "$ENVS_CONF" 2>/dev/null; then
+    sed -i "s|^\$$var = .*|\$$var = $val|" "$ENVS_CONF"
+  else
+    echo "\$$var = $val" >> "$ENVS_CONF"
+  fi
+done
+echo "updated $ENVS_CONF"
+
+# Render omarkit.conf from template
+sed \
+  -e "s|{{MOD}}|$MOD|g" \
+  -e "s|{{LEFT}}|$LEFT|g" \
+  -e "s|{{DOWN}}|$DOWN|g" \
+  -e "s|{{UP}}|$UP|g" \
+  -e "s|{{RIGHT}}|$RIGHT|g" \
+  -e "s|{{PLUGIN_DIR}}|$PLUGIN_DIR|g" \
+  "$PLUGIN_DIR/kitty/omarkit.conf.tmpl" > "$OUT_CONF"
+
+echo "wrote $OUT_CONF"
+
+# Symlink omarchy-kitty into PATH
+mkdir -p "$BIN_DIR"
+ln -sf "$PLUGIN_DIR/bin/omarchy-kitty" "$BIN_DIR/omarchy-kitty"
+echo "linked $BIN_DIR/omarchy-kitty"
+
+# Create migration for one-time kitty.conf + hyprland wiring
+cd "$OMARCHY"
+migration_file="$OMARCHY/migrations/$(git log -1 --format=%cd --date=unix).sh"
+
+cat > "$migration_file" << MIGRATION
+#!/bin/bash
+# omarkit: wire kitty.conf include and hyprland exec-once
+set -euo pipefail
+
+KITTY_CONF="$KITTY_CONF"
+HYPR_CONF="\$HOME/.config/hypr/hyprland.conf"
+
+# Include omarkit.conf from kitty.conf (once)
+if ! grep -q "omarkit.conf" "\$KITTY_CONF" 2>/dev/null; then
+  echo "include $OUT_CONF" >> "\$KITTY_CONF"
+  echo "added include to \$KITTY_CONF"
+fi
+
+# Remove bindings now owned by omarkit.conf from kitty.conf
+# (smart_close, relative_resize, IS_NVIM semicolon passthrough)
+sed -i '/kitten smart_close/d' "\$KITTY_CONF"
+sed -i '/kitten relative_resize/d' "\$KITTY_CONF"
+sed -i '/var:IS_NVIM.*alt+ctrl/d' "\$KITTY_CONF"
+sed -i '/var:IS_NVIM.*semicolon/d' "\$KITTY_CONF"
+
+# Register nav daemon (exec-once, once)
+if ! grep -q "omarchy-nav-daemon" "\$HYPR_CONF" 2>/dev/null; then
+  echo "exec-once = omarchy-nav-daemon" >> "\$HYPR_CONF"
+  echo "added exec-once to \$HYPR_CONF"
+fi
+
+echo "omarkit migration applied"
+MIGRATION
+
+chmod +x "$migration_file"
+echo "created migration: $migration_file"
+nvim "$migration_file"
