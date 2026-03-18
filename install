@@ -90,6 +90,23 @@ bindd = \$OMARKIT_MOD \$OMARKIT_MOD3, \$OMARKIT_RIGHT, Grow window width,    res
 HYPR
 echo "wrote $HYPR_BINDINGS"
 
+# Wire hyprland.conf (idempotent)
+HYPR_CONF="$HOME/.config/hypr/hyprland.conf"
+if ! grep -q "omarkit-bindings.conf" "$HYPR_CONF" 2>/dev/null; then
+  echo "source = $HOME/.config/hypr/omarkit-bindings.conf" >> "$HYPR_CONF"
+  echo "added omarkit-bindings.conf source to $HYPR_CONF"
+fi
+if ! grep -q "omarchy-nav-daemon" "$HYPR_CONF" 2>/dev/null; then
+  echo "exec-once = omarchy-nav-daemon" >> "$HYPR_CONF"
+  echo "added exec-once omarchy-nav-daemon to $HYPR_CONF"
+fi
+
+# Wire kitty.conf (idempotent)
+if ! grep -q "omarkit.conf" "$KITTY_CONF" 2>/dev/null; then
+  echo "include $OUT_CONF" >> "$KITTY_CONF"
+  echo "added include to $KITTY_CONF"
+fi
+
 # Create migration for one-time kitty.conf + hyprland wiring
 cd "$OMARCHY"
 migration_file="$OMARCHY/migrations/$(git log -1 --format=%cd --date=unix).sh"
