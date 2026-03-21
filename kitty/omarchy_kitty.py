@@ -52,7 +52,7 @@ if direction in ("left", "right"):
     if active_idx is not None:
         target_idx = active_idx - 1 if direction == "left" else active_idx + 1
         if 0 <= target_idx < len(tabs):
-            kitty("focus-tab", "--match", f"id:{tabs[target_idx]['id']}")
+            kitty("focus-tab", "--match", f"index:{target_idx}")
             sys.exit()
 
 hyprland()
