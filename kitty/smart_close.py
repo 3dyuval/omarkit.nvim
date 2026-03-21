@@ -86,7 +86,10 @@ def _close_or_confirm(boss, action, message, window):
     busy = _claude_is_busy()
     if _needs_confirm(window, busy):
         if busy:
-            message = f'Claude is busy! {message}'
+            tm = boss.active_tab_manager
+            tab = tm.active_tab if tm else None
+            tab_name = tab.title if tab else 'Process'
+            message = f'{tab_name} is busy! {message}'
         def on_confirm(confirmed, b=boss, a=action, w=window):
             if confirmed:
                 _sigterm_processes(w)
