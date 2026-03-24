@@ -17,15 +17,20 @@ end
 
 local SOCK_PATH = (os.getenv('XDG_RUNTIME_DIR') or ('/run/user/' .. vim.fn.getuid())) .. '/omarchy-nav.sock'
 
+--- Kitty OS-window PID from $KITTY_LISTEN_ON (e.g. "unix:@mykitty-12345"), or nil.
+local KITTY_PID = (os.getenv('KITTY_LISTEN_ON') or ''):match('%-(%d+)$')
+
 --- Write direction to daemon socket (async, fire-and-forget).
+--- Sends "direction pid" so daemon runs full dispatch() including kitty layer.
 --- Falls back to hyprctl if socket is unavailable.
 local function dispatch_edge(direction)
+  local msg = KITTY_PID and ('edge ' .. direction .. ' ' .. KITTY_PID .. '\n') or (direction .. '\n')
   local pipe = vim.uv.new_pipe(false)
   pipe:connect(SOCK_PATH, function(err)
     if err then
       vim.fn.jobstart({ 'hyprctl', 'dispatch', 'movefocus', direction })
     else
-      pipe:write(direction .. '\n', function() pipe:close() end)
+      pipe:write(msg, function() pipe:close() end)
     end
   end)
 end
@@ -35,6 +40,7 @@ local function nav(wincmd_dir, hypr_dir)
   return function()
     local win = vim.api.nvim_get_current_win()
     vim.cmd('wincmd ' .. wincmd_dir)
+    -- probable cause if edge never fires: wincmd found a neighbour (winnr('$') > 1)
     if vim.api.nvim_get_current_win() == win then
       dispatch_edge(hypr_dir)
     end
@@ -52,10 +58,8 @@ function M.startup()
   })
 end
 
---- Called by the user's lazy.nvim spec opts/config to set keys and options.
-function M.setup(opts)
-  require('omarkit.config').setup(opts)
-
+--- Register all keymaps. Exposed on M so it can be called manually: lua require('omarkit').register_keymaps()
+function M.register_keymaps()
   local keys = require('omarkit.config').keys
   local nav_map = {
     [keys.nav_left]  = { 'h', 'left',  'Window left' },
@@ -80,6 +84,18 @@ function M.setup(opts)
       vim.keymap.set('n', lhs, function() vim.cmd(spec[1]) end, { noremap = true, desc = spec[2] })
     end
   end
+end
+
+--- Called by the user's lazy.nvim spec opts/config to set keys and options.
+function M.setup(opts)
+  require('omarkit.config').setup(opts)
+
+  -- Defer keymap registration to VeryLazy so we run after LazyVim's default keymaps.
+  vim.api.nvim_create_autocmd('User', {
+    pattern = 'VeryLazy',
+    once = true,
+    callback = M.register_keymaps,
+  })
 end
 
 return M

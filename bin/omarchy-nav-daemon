@@ -52,6 +52,37 @@ def hyprctl(direction):
     )
 
 
+def _kitty_nav(sock_addr, direction, os_win):
+    """Try kitty split → tab → hyprland. Does not send keys to nvim."""
+    tab = next((t for t in os_win['tabs'] if t.get('is_active')), None)
+    if not tab:
+        hyprctl(direction)
+        return
+
+    if direction in ('left', 'right'):
+        # Try spatial neighbor first; fall back to window list order (guards against stale neighbor IDs)
+        if not kitty(sock_addr, 'focus-window', '--match', f'neighbor:{KITTY_DIR[direction]}'):
+            windows = tab['windows']
+            cur_idx = next((i for i, w in enumerate(windows) if w.get('is_active')), None)
+            if cur_idx is not None:
+                target_idx = cur_idx - 1 if direction == 'left' else cur_idx + 1
+                if 0 <= target_idx < len(windows):
+                    kitty(sock_addr, 'focus-window', '--match', f'id:{windows[target_idx]["id"]}')
+                    return
+            # No window neighbor — try adjacent tab
+            tabs = os_win['tabs']
+            tab_idx = next((i for i, t in enumerate(tabs) if t.get('is_active')), None)
+            if tab_idx is not None:
+                target_tab_idx = tab_idx - 1 if direction == 'left' else tab_idx + 1
+                if 0 <= target_tab_idx < len(tabs):
+                    kitty(sock_addr, 'focus-tab', '--match', f'id:{tabs[target_tab_idx]["id"]}')
+                    return
+        else:
+            return
+
+    hyprctl(direction)
+
+
 def dispatch(direction, pid):
     sock_addr = f'unix:@mykitty-{pid}'
 
@@ -72,26 +103,32 @@ def dispatch(direction, pid):
 
     win = next((w for w in tab['windows'] if w.get('is_active') and w.get('is_focused')), None)
 
-    # IS_NVIM: pass key through to nvim
-    if win and win.get('user_vars', {}).get('IS_NVIM'):
-        kitty(sock_addr, 'send-key', KITTY_KEY[direction])
+    # IS_NVIM: pass key through to nvim (smart-splits handles intra-nvim nav)
+    is_nvim = win and win.get('user_vars', {}).get('IS_NVIM')
+    if is_nvim:
+        kitty_run(sock_addr, 'send-key', KITTY_KEY[direction])
         return
 
-    # Neighboring kitty split
-    if kitty(sock_addr, 'focus-window', '--match', f'neighbor:{KITTY_DIR[direction]}'):
+    _kitty_nav(sock_addr, direction, os_win)
+
+
+
+def dispatch_from_edge(direction, pid):
+    """Called when nvim has already handled navigation and hit its edge.
+    Skips the IS_NVIM send-key to avoid an infinite loop."""
+    sock_addr = f'unix:@mykitty-{pid}'
+
+    state = kitty_ls(sock_addr)
+    if state is None:
+        hyprctl(direction)
         return
 
-    # Adjacent tab (horizontal only)
-    if direction in ('left', 'right'):
-        tabs = os_win['tabs']
-        active_idx = next((i for i, t in enumerate(tabs) if t.get('is_active')), None)
-        if active_idx is not None:
-            target_idx = active_idx - 1 if direction == 'left' else active_idx + 1
-            if 0 <= target_idx < len(tabs):
-                kitty(sock_addr, 'focus-tab', '--match', f"id:{tabs[target_idx]['id']}")
-                return
+    os_win = next((w for w in state if w.get('is_focused')), None)
+    if not os_win:
+        hyprctl(direction)
+        return
 
-    hyprctl(direction)
+    _kitty_nav(sock_addr, direction, os_win)
 
 
 def serve():
@@ -121,9 +158,11 @@ def serve():
             data = conn.recv(64).decode().strip()
             parts = data.split()
             if len(parts) == 2 and parts[0] in HYPR_DIR:
-                dispatch(parts[0], parts[1])   # from hyprland binding (has kitty pid)
+                dispatch(parts[0], parts[1])                      # from hyprland binding
+            elif len(parts) == 3 and parts[0] == 'edge' and parts[1] in HYPR_DIR:
+                dispatch_from_edge(parts[1], parts[2])            # from nvim edge (skip IS_NVIM)
             elif len(parts) == 1 and parts[0] in HYPR_DIR:
-                hyprctl(parts[0])              # from nvim edge (no kitty context needed)
+                hyprctl(parts[0])                                  # fallback (no pid available)
         except Exception:
             pass
         finally:
