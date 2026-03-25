@@ -13,8 +13,8 @@ HYPR_CONF="$HOME/.config/hypr/hyprland.conf"
 HYPR_BINDINGS="$HOME/.config/hypr/omarkit-bindings.conf"
 
 MOD="${OMARKIT_MOD:-SUPER}"
-MOD2="${OMARKIT_MOD2:-CTRL}"
-MOD3="${OMARKIT_MOD3:-ALT}"
+MOD2="${OMARKIT_MOD2:-ALT}"
+MOD3="${OMARKIT_MOD3:-CTRL}"
 LEFT="${OMARKIT_LEFT:-h}"
 DOWN="${OMARKIT_DOWN:-a}"
 UP="${OMARKIT_UP:-e}"
@@ -79,11 +79,11 @@ bindd = $MOD $MOD2, $DOWN,  Move window down,  movewindow, d
 bindd = $MOD $MOD2, $UP,    Move window up,    movewindow, u
 bindd = $MOD $MOD2, $RIGHT, Move window right, movewindow, r
 
-# TODO: MOD3 (CTRL) repurposed for workspace switching — find new resize binding
-# bindd = $MOD $MOD3, $LEFT,  Shrink window width,  resizeactive, -100 0
-# bindd = $MOD $MOD3, $DOWN,  Grow window height,   resizeactive, 0 100
-# bindd = $MOD $MOD3, $UP,    Shrink window height, resizeactive, 0 -100
-# bindd = $MOD $MOD3, $RIGHT, Grow window width,    resizeactive, 100 0
+# MOD + CTRL + ALT + dir => Resize window (routed via daemon: nvim splits → kitty splits → hyprland)
+bindd = $MOD CTRL ALT, $LEFT,  Resize window left,  exec, omarchy-movefocus-hypr --resize left
+bindd = $MOD CTRL ALT, $DOWN,  Resize window down,  exec, omarchy-movefocus-hypr --resize down
+bindd = $MOD CTRL ALT, $UP,    Resize window up,    exec, omarchy-movefocus-hypr --resize up
+bindd = $MOD CTRL ALT, $RIGHT, Resize window right, exec, omarchy-movefocus-hypr --resize right
 HYPR
   echo "  wrote $HYPR_BINDINGS"
 }
@@ -139,32 +139,30 @@ step_waybar() {
   echo "  refreshed waybar"
 }
 
-steps=(
-  "Envs (hypr envs.conf):step_envs"
-  "Render omarkit.conf:step_render"
-  "Copy bins:step_bins"
-  "Hypr bindings file:step_hypr_bindings"
-  "Wire hyprland.conf:step_wire_hypr"
-  "Wire kitty.conf:step_wire_kitty"
-  "Cleanup kitty.conf duplicates:step_cleanup_kitty"
-  "Reload kitty config:step_reload_kitty"
-  "Refresh waybar:step_waybar"
+run_render()  { step_envs; step_render; step_hypr_bindings; }
+run_wire()    { step_bins; step_wire_hypr; step_wire_kitty; step_cleanup_kitty; }
+run_reload()  { step_reload_kitty; step_waybar; }
+
+groups=(
+  "Render configs (envs, kitty conf, hypr bindings):run_render"
+  "Wire dotfiles (bins, hyprland.conf, kitty.conf):run_wire"
+  "Reload (kitty, waybar):run_reload"
 )
 
 labels=()
-for s in "${steps[@]}"; do labels+=("${s%%:*}"); done
+for g in "${groups[@]}"; do labels+=("${g%%:*}"); done
 
 if [[ "$RUN_ALL" == "true" ]]; then
   selected=$(printf '%s\n' "${labels[@]}")
 else
-  selected=$(printf '%s\n' "${labels[@]}" | gum choose --no-limit --header "omarkit install — select steps" --selected "${labels[*]}")
+  selected=$(IFS=, ; printf '%s\n' "${labels[@]}" | gum choose --no-limit --header "omarkit install" --selected "${labels[*]}")
 fi
 
 [[ -z "$selected" ]] && echo "Nothing selected." && exit 0
 
-for s in "${steps[@]}"; do
-  label="${s%%:*}"
-  fn="${s#*:}"
+for g in "${groups[@]}"; do
+  label="${g%%:*}"
+  fn="${g#*:}"
   if echo "$selected" | grep -qF "$label"; then
     echo -e "\n\033[32m▶ $label\033[0m"
     $fn

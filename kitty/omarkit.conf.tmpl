@@ -4,15 +4,14 @@
 map ctrl+w         kitten {{PLUGIN_DIR}}/kitty/smart_close.py
 map ctrl+shift+w   kitten {{PLUGIN_DIR}}/kitty/smart_close.py --all
 
-# ── Resize ─────────────────────────────────────────────────────────────────
-map alt+ctrl+down  kitten {{PLUGIN_DIR}}/kitty/relative_resize.py down 5
-map alt+ctrl+up    kitten {{PLUGIN_DIR}}/kitty/relative_resize.py up   5
-
 # ── Passthrough: unset kitty ctrl+* bindings per focused app ───────────────
 # ctrl+w (smart_close) intentionally kept for all apps.
-# Add IS_* conditions here to unset specific bindings per app type.
-map --when-focus-on var:IS_NVIM alt+ctrl+down
-map --when-focus-on var:IS_NVIM alt+ctrl+up
+# Resize (alt+ctrl+dir) is handled by Hyprland → daemon — unset here so kitty
+# doesn't intercept when daemon sends-key ctrl+alt+* to nvim.
+map --when-focus-on var:IS_NVIM alt+ctrl+{{LEFT}}
+map --when-focus-on var:IS_NVIM alt+ctrl+{{DOWN}}
+map --when-focus-on var:IS_NVIM alt+ctrl+{{UP}}
+map --when-focus-on var:IS_NVIM alt+ctrl+{{RIGHT}}
 map --when-focus-on var:IS_NVIM ctrl+semicolon
 map --when-focus-on var:IS_NVIM ctrl+h
 map --when-focus-on var:IS_NVIM ctrl+a

@@ -20,27 +20,43 @@ local SOCK_PATH = (os.getenv('XDG_RUNTIME_DIR') or ('/run/user/' .. vim.fn.getui
 --- Kitty OS-window PID from $KITTY_LISTEN_ON (e.g. "unix:@mykitty-12345"), or nil.
 local KITTY_PID = (os.getenv('KITTY_LISTEN_ON') or ''):match('%-(%d+)$')
 
+--- Send a message to the daemon socket (async, fire-and-forget).
+local function dispatch_msg(msg, hypr_fallback_args)
+  local pipe = vim.uv.new_pipe(false)
+  pipe:connect(SOCK_PATH, function(err)
+    if err then
+      vim.fn.jobstart(hypr_fallback_args)
+    else
+      pipe:write(msg .. '\n', function() pipe:close() end)
+    end
+  end)
+end
+
 --- Write direction to daemon socket (async, fire-and-forget).
 --- Sends "direction pid" so daemon runs full dispatch() including kitty layer.
 --- Falls back to hyprctl if socket is unavailable.
 local function dispatch_edge(direction)
-  local msg = KITTY_PID and ('edge ' .. direction .. ' ' .. KITTY_PID .. '\n') or (direction .. '\n')
-  local pipe = vim.uv.new_pipe(false)
-  pipe:connect(SOCK_PATH, function(err)
-    if err then
-      vim.fn.jobstart({ 'hyprctl', 'dispatch', 'movefocus', direction })
-    else
-      pipe:write(msg, function() pipe:close() end)
-    end
-  end)
+  local msg = KITTY_PID and ('edge ' .. direction .. ' ' .. KITTY_PID) or direction
+  dispatch_msg(msg, { 'hyprctl', 'dispatch', 'movefocus', direction })
+end
+
+local function dispatch_resize_edge(direction)
+  local msg = KITTY_PID and ('resize_edge ' .. direction .. ' ' .. KITTY_PID) or ('resize ' .. direction)
+  dispatch_msg(msg, { 'hyprctl', 'dispatch', 'resizeactive',
+    direction == 'left' and '-50' or direction == 'right' and '50' or '0',
+    direction == 'up'   and '-50' or direction == 'down'  and '50' or '0' })
 end
 
 --- Navigate in direction via wincmd; dispatch to daemon at nvim split edge.
 local function nav(wincmd_dir, hypr_dir)
   return function()
     local win = vim.api.nvim_get_current_win()
+    local config = vim.api.nvim_win_get_config(win)
+    if config.relative ~= '' then
+      dispatch_edge(hypr_dir)
+      return
+    end
     vim.cmd('wincmd ' .. wincmd_dir)
-    -- probable cause if edge never fires: wincmd found a neighbour (winnr('$') > 1)
     if vim.api.nvim_get_current_win() == win then
       dispatch_edge(hypr_dir)
     end
@@ -70,18 +86,28 @@ function M.register_keymaps()
   for lhs, spec in pairs(nav_map) do
     if lhs then
       vim.keymap.set('n', lhs, nav(spec[1], spec[2]), { noremap = true, desc = spec[3] })
+      vim.keymap.set('t', lhs, '<C-\\><C-n>' .. lhs, { noremap = true, desc = spec[3] })
     end
   end
 
+  -- winnr_dir: direction to check for a neighbor before resizing
+  -- wincmd:    resize command when neighbor exists
+  -- hypr_dir:  direction sent to daemon when at nvim edge
   local resize_map = {
-    [keys.resize_left]  = { '5 wincmd <', 'Shrink window width' },
-    [keys.resize_down]  = { '5 wincmd +', 'Grow window height' },
-    [keys.resize_up]    = { '5 wincmd -', 'Shrink window height' },
-    [keys.resize_right] = { '5 wincmd >', 'Grow window width' },
+    [keys.resize_left]  = { 'h', '<', 'left',  'Resize left' },
+    [keys.resize_down]  = { 'j', '+', 'down',  'Resize down' },
+    [keys.resize_up]    = { 'k', '-', 'up',    'Resize up' },
+    [keys.resize_right] = { 'l', '>', 'right', 'Resize right' },
   }
   for lhs, spec in pairs(resize_map) do
     if lhs then
-      vim.keymap.set('n', lhs, function() vim.cmd(spec[1]) end, { noremap = true, desc = spec[2] })
+      vim.keymap.set('n', lhs, function()
+        if vim.fn.winnr(spec[1]) == vim.fn.winnr() then
+          dispatch_resize_edge(spec[3])
+        else
+          vim.cmd('5 wincmd ' .. spec[2])
+        end
+      end, { noremap = true, desc = spec[4] })
     end
   end
 end

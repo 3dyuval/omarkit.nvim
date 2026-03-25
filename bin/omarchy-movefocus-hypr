@@ -1,20 +1,36 @@
 #!/bin/bash
-direction=${1:?direction required}
-
 declare -A HYPR_DIR=([left]=l [right]=r [up]=u [down]=d)
+declare -A HYPR_RESIZE_DELTA=([left]="-50 0" [right]="50 0" [up]="0 -50" [down]="0 50")
 
 SOCK="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/omarchy-nav.sock"
 PLUGIN_DIR="${OMARKIT_PATH:?OMARKIT_PATH not set — re-run omarkit install}"
+
+resize=false
+[[ "${1:-}" == "--resize" ]] && resize=true && shift
+direction=${1:?direction required}
 
 active_window=$(hyprctl activewindow -j 2>/dev/null)
 read -r active_class active_pid < <(echo "$active_window" | jq -r '[.class // empty, .pid // empty] | @tsv')
 
 if [[ "$active_class" == "kitty" ]]; then
-  if [[ -S "$SOCK" ]] && echo "$direction $active_pid" | socat - "UNIX-CONNECT:$SOCK" 2>/dev/null; then
-    exit 0
+  if [[ "$resize" == "true" ]]; then
+    if [[ -S "$SOCK" ]] && echo "resize $direction $active_pid" | socat - "UNIX-CONNECT:$SOCK" 2>/dev/null; then
+      exit 0
+    fi
+    # Fallback: direct kitten resize
+    python3 "$PLUGIN_DIR/kitty/relative_resize.py" "$direction" "unix:@mykitty-$active_pid"
+  else
+    if [[ -S "$SOCK" ]] && echo "$direction $active_pid" | socat - "UNIX-CONNECT:$SOCK" 2>/dev/null; then
+      exit 0
+    fi
+    # Fallback: direct Python nav
+    python3 "$PLUGIN_DIR/kitty/omarchy_kitty.py" "$direction" "unix:@mykitty-$active_pid"
   fi
-  # Fallback: direct Python if daemon is not running
-  python3 "$PLUGIN_DIR/kitty/omarchy_kitty.py" "$direction" "unix:@mykitty-$active_pid"
 else
-  hyprctl dispatch movefocus "${HYPR_DIR[$direction]}" >/dev/null
+  if [[ "$resize" == "true" ]]; then
+    # shellcheck disable=SC2086
+    hyprctl dispatch resizeactive ${HYPR_RESIZE_DELTA[$direction]} >/dev/null
+  else
+    hyprctl dispatch movefocus "${HYPR_DIR[$direction]}" >/dev/null
+  fi
 fi

@@ -13,6 +13,16 @@ import socket
 import subprocess
 import sys
 
+LOG_PATH = os.path.join(
+    os.environ.get('XDG_RUNTIME_DIR', f'/run/user/{os.getuid()}'),
+    'omarchy-nav-daemon.log'
+)
+
+def log(*args):
+    msg = ' '.join(str(a) for a in args)
+    with open(LOG_PATH, 'a') as f:
+        f.write(msg + '\n')
+
 SOCK_PATH = os.path.join(
     os.environ.get('XDG_RUNTIME_DIR', f'/run/user/{os.getuid()}'),
     'omarchy-nav.sock'
@@ -21,6 +31,11 @@ SOCK_PATH = os.path.join(
 HYPR_DIR  = {'left': 'l', 'right': 'r', 'up': 'u', 'down': 'd'}
 KITTY_DIR = {'left': 'left', 'right': 'right', 'up': 'top', 'down': 'bottom'}
 KITTY_KEY = {'left': 'ctrl+h', 'right': 'ctrl+i', 'up': 'ctrl+e', 'down': 'ctrl+a'}
+
+KITTY_RESIZE_KEY  = {'left': 'ctrl+alt+h', 'right': 'ctrl+alt+i', 'up': 'ctrl+alt+e', 'down': 'ctrl+alt+a'}
+KITTY_RESIZE_AXIS = {'left': 'horizontal', 'right': 'horizontal', 'up': 'vertical', 'down': 'vertical'}
+KITTY_RESIZE_INC  = {'left': 5, 'right': 5, 'up': 5, 'down': 5}
+HYPR_RESIZE_DELTA = {'left': ['-50', '0'], 'right': ['50', '0'], 'up': ['0', '-50'], 'down': ['0', '50']}
 
 
 def kitty_run(sock_addr, *args, text=False):
@@ -50,6 +65,45 @@ def hyprctl(direction):
         ['hyprctl', 'dispatch', 'movefocus', HYPR_DIR[direction]],
         capture_output=True
     )
+
+
+def hypr_resize(direction):
+    log(f'  → hypr_resize {direction} delta={HYPR_RESIZE_DELTA[direction]}')
+    subprocess.run(
+        ['hyprctl', 'dispatch', 'resizeactive', *HYPR_RESIZE_DELTA[direction]],
+        capture_output=True
+    )
+
+
+def kitty_resize_window(sock_addr, direction):
+    inc = KITTY_RESIZE_INC[direction]
+    axis = KITTY_RESIZE_AXIS[direction]
+    log(f'  → kitty_resize_window {direction} axis={axis} inc={inc}')
+    kitty(sock_addr, 'resize-window', '--axis', axis, '--increment', str(inc))
+
+
+def kitty_neighbor_in_dir(windows, active_win, direction):
+    g = active_win['geometry']
+    log(f'  neighbor_check dir={direction} active_win={active_win["id"]} geom={g}')
+    for w in windows:
+        if w['id'] == active_win['id']:
+            continue
+        og = w['geometry']
+        log(f'    candidate id={w["id"]} geom={og}')
+        if direction == 'left'  and abs(og['right']  - g['left'])  < 2:
+            log(f'    → left neighbor found: id={w["id"]}')
+            return w
+        if direction == 'right' and abs(og['left']   - g['right']) < 2:
+            log(f'    → right neighbor found: id={w["id"]}')
+            return w
+        if direction == 'up'    and abs(og['bottom'] - g['top'])   < 2:
+            log(f'    → up neighbor found: id={w["id"]}')
+            return w
+        if direction == 'down'  and abs(og['top']    - g['bottom'])< 2:
+            log(f'    → down neighbor found: id={w["id"]}')
+            return w
+    log(f'    → no neighbor in {direction}')
+    return None
 
 
 def _kitty_nav(sock_addr, direction, os_win):
@@ -131,6 +185,73 @@ def dispatch_from_edge(direction, pid):
     _kitty_nav(sock_addr, direction, os_win)
 
 
+def dispatch_resize(direction, pid):
+    """From Hyprland binding — check IS_NVIM, then resize kitty or hyprland."""
+    log(f'dispatch_resize dir={direction} pid={pid}')
+    sock_addr = f'unix:@mykitty-{pid}'
+
+    state = kitty_ls(sock_addr)
+    if state is None:
+        log('  kitty_ls failed → hypr_resize')
+        hypr_resize(direction)
+        return
+
+    os_win = next((w for w in state if w.get('is_focused')), None)
+    if not os_win:
+        log('  no focused os_win → hypr_resize')
+        hypr_resize(direction)
+        return
+
+    tab = next((t for t in os_win['tabs'] if t.get('is_active')), None)
+    if not tab:
+        log('  no active tab → hypr_resize')
+        hypr_resize(direction)
+        return
+
+    win = next((w for w in tab['windows'] if w.get('is_active') and w.get('is_focused')), None)
+    log(f'  active win={win["id"] if win else None} IS_NVIM={win.get("user_vars", {}).get("IS_NVIM") if win else None}')
+
+    if win and win.get('user_vars', {}).get('IS_NVIM'):
+        log(f'  IS_NVIM → send-key {KITTY_RESIZE_KEY[direction]}')
+        kitty_run(sock_addr, 'send-key', KITTY_RESIZE_KEY[direction])
+        return
+
+    windows = tab['windows']
+    if win and kitty_neighbor_in_dir(windows, win, direction):
+        kitty_resize_window(sock_addr, direction)
+    else:
+        hypr_resize(direction)
+
+
+def dispatch_resize_edge(direction, pid):
+    """From nvim at its split edge — skip IS_NVIM, resize kitty split or hyprland window."""
+    log(f'dispatch_resize_edge dir={direction} pid={pid}')
+    sock_addr = f'unix:@mykitty-{pid}'
+
+    state = kitty_ls(sock_addr)
+    if state is None:
+        log('  kitty_ls failed → hypr_resize')
+        hypr_resize(direction)
+        return
+
+    os_win = next((w for w in state if w.get('is_focused')), None)
+    if not os_win:
+        log('  no focused os_win → hypr_resize')
+        hypr_resize(direction)
+        return
+
+    tab = next((t for t in os_win['tabs'] if t.get('is_active')), None)
+    if tab:
+        windows = tab.get('windows', [])
+        active_win = next((w for w in windows if w.get('is_active')), None)
+        log(f'  active_win={active_win["id"] if active_win else None} windows={[w["id"] for w in windows]}')
+        if active_win and kitty_neighbor_in_dir(windows, active_win, direction):
+            kitty_resize_window(sock_addr, direction)
+            return
+    log('  no kitty neighbor → hypr_resize')
+    hypr_resize(direction)
+
+
 def serve():
     try:
         os.unlink(SOCK_PATH)
@@ -158,11 +279,15 @@ def serve():
             data = conn.recv(64).decode().strip()
             parts = data.split()
             if len(parts) == 2 and parts[0] in HYPR_DIR:
-                dispatch(parts[0], parts[1])                      # from hyprland binding
+                dispatch(parts[0], parts[1])                          # nav from hyprland
             elif len(parts) == 3 and parts[0] == 'edge' and parts[1] in HYPR_DIR:
-                dispatch_from_edge(parts[1], parts[2])            # from nvim edge (skip IS_NVIM)
+                dispatch_from_edge(parts[1], parts[2])                # nav from nvim edge
+            elif len(parts) == 3 and parts[0] == 'resize' and parts[1] in HYPR_DIR:
+                dispatch_resize(parts[1], parts[2])                   # resize from hyprland
+            elif len(parts) == 3 and parts[0] == 'resize_edge' and parts[1] in HYPR_DIR:
+                dispatch_resize_edge(parts[1], parts[2])              # resize from nvim edge
             elif len(parts) == 1 and parts[0] in HYPR_DIR:
-                hyprctl(parts[0])                                  # fallback (no pid available)
+                hyprctl(parts[0])                                      # nav fallback (no pid)
         except Exception:
             pass
         finally:
