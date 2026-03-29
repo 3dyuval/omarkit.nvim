@@ -45,7 +45,9 @@ fi
 
 step_envs() {
   touch "$ENVS_CONF"
-  grep -v '^\$OMARKIT_\|^env = OMARKIT_PATH' "$ENVS_CONF" > "${ENVS_CONF}.tmp" && mv "${ENVS_CONF}.tmp" "$ENVS_CONF"
+  local tmp
+  tmp=$(grep -v '^env = OMARKIT_PATH' "$ENVS_CONF")
+  printf '%s\n' "$tmp" > "$ENVS_CONF"
   echo "env = OMARKIT_PATH,$PLUGIN_DIR" >> "$ENVS_CONF"
   echo "  updated $ENVS_CONF"
 }
