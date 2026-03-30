@@ -25,7 +25,7 @@ local function dispatch_msg(msg, hypr_fallback_args)
   local pipe = vim.uv.new_pipe(false)
   pipe:connect(SOCK_PATH, function(err)
     if err then
-      vim.fn.jobstart(hypr_fallback_args)
+      vim.schedule(function() vim.fn.jobstart(hypr_fallback_args) end)
     else
       pipe:write(msg .. '\n', function() pipe:close() end)
     end
