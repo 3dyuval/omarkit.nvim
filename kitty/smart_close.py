@@ -9,7 +9,7 @@ def main(args):
 
 
 SHELLS = {'zsh', 'bash', 'fish', 'sh', 'dash'}
-IMMEDIATE_CLOSE = {'nvim', 'vim', 'vi', 'Yazi', 'kitty'}
+IMMEDIATE_CLOSE = {'nvim', 'vim', 'vi', 'yazi', 'kitty'}
 
 _BUSY_DIR = os.path.join(
     os.environ.get('XDG_RUNTIME_DIR', f'/run/user/{os.getuid()}'),
