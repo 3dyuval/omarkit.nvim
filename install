@@ -154,7 +154,7 @@ groups=(
 labels=()
 for g in "${groups[@]}"; do labels+=("${g%%:*}"); done
 
-if [[ "$RUN_ALL" == "true" ]]; then
+if [[ "$RUN_ALL" == "true" ]] || ! [[ -t 0 ]]; then
   selected=$(printf '%s\n' "${labels[@]}")
 else
   selected=$(IFS=, ; printf '%s\n' "${labels[@]}" | gum choose --no-limit --header "omarkit install" --selected "${labels[*]}")
