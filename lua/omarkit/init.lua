@@ -89,13 +89,26 @@ function M.register_keymaps()
     { keys.nav_up,    'k', 'up',    'Window up' },
     { keys.nav_right, 'l', 'right', 'Window right' },
   }
-  for _, spec in ipairs(nav_specs) do
-    local fn = nav(spec[2], spec[3])
-    for _, lhs in ipairs(to_list(spec[1])) do
-      vim.keymap.set('n', lhs, fn, { noremap = true, desc = spec[4] })
-      vim.keymap.set('t', lhs, '<C-\\><C-n>' .. lhs, { noremap = true, desc = spec[4] })
+
+  -- Apply nav keymaps to a buffer (nil = global). Re-applied on BufEnter so
+  -- buffer-local keymaps set by plugins (snacks, avante, etc.) don't shadow them.
+  local function apply_nav(buf)
+    for _, spec in ipairs(nav_specs) do
+      local fn = nav(spec[2], spec[3])
+      for _, lhs in ipairs(to_list(spec[1])) do
+        vim.keymap.set('n', lhs, fn, { noremap = true, desc = spec[4], buffer = buf })
+        if not buf then
+          vim.keymap.set('t', lhs, '<C-\\><C-n>' .. lhs, { noremap = true, desc = spec[4] })
+        end
+      end
     end
   end
+
+  apply_nav(nil)
+  vim.api.nvim_create_autocmd('BufEnter', {
+    group = vim.api.nvim_create_augroup('omarkit_nav', { clear = true }),
+    callback = function(ev) apply_nav(ev.buf) end,
+  })
 
   -- winnr_dir: direction to check for a neighbor before resizing
   -- wincmd:    resize command when neighbor exists
