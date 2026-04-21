@@ -74,40 +74,48 @@ function M.startup()
   })
 end
 
+--- Normalize a key config value to a flat list of lhs strings.
+local function to_list(v)
+  if not v then return {} end
+  return type(v) == 'table' and v or { v }
+end
+
 --- Register all keymaps. Exposed on M so it can be called manually: lua require('omarkit').register_keymaps()
 function M.register_keymaps()
   local keys = require('omarkit.config').keys
-  local nav_map = {
-    [keys.nav_left]  = { 'h', 'left',  'Window left' },
-    [keys.nav_down]  = { 'j', 'down',  'Window down' },
-    [keys.nav_up]    = { 'k', 'up',    'Window up' },
-    [keys.nav_right] = { 'l', 'right', 'Window right' },
+  local nav_specs = {
+    { keys.nav_left,  'h', 'left',  'Window left' },
+    { keys.nav_down,  'j', 'down',  'Window down' },
+    { keys.nav_up,    'k', 'up',    'Window up' },
+    { keys.nav_right, 'l', 'right', 'Window right' },
   }
-  for lhs, spec in pairs(nav_map) do
-    if lhs then
-      vim.keymap.set('n', lhs, nav(spec[1], spec[2]), { noremap = true, desc = spec[3] })
-      vim.keymap.set('t', lhs, '<C-\\><C-n>' .. lhs, { noremap = true, desc = spec[3] })
+  for _, spec in ipairs(nav_specs) do
+    local fn = nav(spec[2], spec[3])
+    for _, lhs in ipairs(to_list(spec[1])) do
+      vim.keymap.set('n', lhs, fn, { noremap = true, desc = spec[4] })
+      vim.keymap.set('t', lhs, '<C-\\><C-n>' .. lhs, { noremap = true, desc = spec[4] })
     end
   end
 
   -- winnr_dir: direction to check for a neighbor before resizing
   -- wincmd:    resize command when neighbor exists
   -- hypr_dir:  direction sent to daemon when at nvim edge
-  local resize_map = {
-    [keys.resize_left]  = { 'h', '<', 'left',  'Resize left' },
-    [keys.resize_down]  = { 'j', '+', 'down',  'Resize down' },
-    [keys.resize_up]    = { 'k', '-', 'up',    'Resize up' },
-    [keys.resize_right] = { 'l', '>', 'right', 'Resize right' },
+  local resize_specs = {
+    { keys.resize_left,  'h', '<', 'left',  'Resize left' },
+    { keys.resize_down,  'j', '+', 'down',  'Resize down' },
+    { keys.resize_up,    'k', '-', 'up',    'Resize up' },
+    { keys.resize_right, 'l', '>', 'right', 'Resize right' },
   }
-  for lhs, spec in pairs(resize_map) do
-    if lhs then
+  for _, spec in ipairs(resize_specs) do
+    local winnr_dir, wincmd, hypr_dir, desc = spec[2], spec[3], spec[4], spec[5]
+    for _, lhs in ipairs(to_list(spec[1])) do
       vim.keymap.set('n', lhs, function()
-        if vim.fn.winnr(spec[1]) == vim.fn.winnr() then
-          dispatch_resize_edge(spec[3])
+        if vim.fn.winnr(winnr_dir) == vim.fn.winnr() then
+          dispatch_resize_edge(hypr_dir)
         else
-          vim.cmd('5 wincmd ' .. spec[2])
+          vim.cmd('5 wincmd ' .. wincmd)
         end
-      end, { noremap = true, desc = spec[4] })
+      end, { noremap = true, desc = desc })
     end
   end
 end

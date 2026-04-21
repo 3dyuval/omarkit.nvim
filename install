@@ -75,6 +75,12 @@ bindd = $MOD, $DOWN,  Focus window down,  exec, omarchy-movefocus-hypr down
 bindd = $MOD, $UP,    Focus window up,    exec, omarchy-movefocus-hypr up
 bindd = $MOD, $RIGHT, Focus window right, exec, omarchy-movefocus-hypr right
 
+# MOD + arrow => Focus window (arrow aliases)
+bindd = $MOD, left,  Focus window left,  exec, omarchy-movefocus-hypr left
+bindd = $MOD, down,  Focus window down,  exec, omarchy-movefocus-hypr down
+bindd = $MOD, up,    Focus window up,    exec, omarchy-movefocus-hypr up
+bindd = $MOD, right, Focus window right, exec, omarchy-movefocus-hypr right
+
 # MOD + MOD2 + dir => Move window
 bindd = $MOD $MOD2, $LEFT,  Move window left,  movewindow, l
 bindd = $MOD $MOD2, $DOWN,  Move window down,  movewindow, d

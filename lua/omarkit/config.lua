@@ -3,23 +3,23 @@
 ---@field keys OmarkittyKeys
 
 ---@class OmarkittyKeys
----@field nav_left string|false
----@field nav_down string|false
----@field nav_up string|false
----@field nav_right string|false
----@field resize_left string|false
----@field resize_down string|false
----@field resize_up string|false
----@field resize_right string|false
+---@field nav_left string|string[]|false
+---@field nav_down string|string[]|false
+---@field nav_up string|string[]|false
+---@field nav_right string|string[]|false
+---@field resize_left string|string[]|false
+---@field resize_down string|string[]|false
+---@field resize_up string|string[]|false
+---@field resize_right string|string[]|false
 
 ---@type OmarkittyConfig
 local defaults = {
   daemon_socket = (os.getenv('XDG_RUNTIME_DIR') or ('/run/user/' .. vim.fn.getuid())) .. '/omarchy-nav.sock',
   keys = {
-    nav_left     = '<C-h>',
-    nav_down     = '<C-a>',
-    nav_up       = '<C-e>',
-    nav_right    = '<C-i>',
+    nav_left     = { '<C-h>', '<M-Left>' },
+    nav_down     = { '<C-a>', '<M-Down>' },
+    nav_up       = { '<C-e>', '<M-Up>' },
+    nav_right    = { '<C-i>', '<M-Right>' },
     resize_left  = '<M-C-h>',
     resize_down  = '<M-C-a>',
     resize_up    = '<M-C-e>',
