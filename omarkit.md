@@ -16,33 +16,33 @@ flowchart LR
     mfh -->|fallback| opy["omarchy_kitty.py\n(daemon down)"]
 
     sock --> daemon["omarchy-nav-daemon\n(persistent)"]
-    daemon -->|IS_NVIM?| nvim_key["send-key → nvim"]
     daemon -->|neighbor?| kitty_focus["focus-window"]
     daemon -->|tab?| kitty_tab["focus-tab"]
     daemon -->|else| hyprctl["hyprctl movefocus"]
 
-    nvim["nvim omarkit\nnav()"] -->|"direction\n(at edge)"| sock
+    nvim["nvim omarkit\nnav()"] -->|"wincmd (local only)"| nvim_split["vim split"]
 ```
 
 **Protocol:** fire-and-forget, one line per message
 - `"<direction> <kitty-pid>"` — from Hyprland binding (full kitty state machine)
-- `"<direction>"` — from nvim edge (hyprctl only, kitty already handled by nvim)
+- `"resize <direction> <kitty-pid>"` — from Hyprland binding (resize)
+
+nvim navigates/resizes its own splits with `wincmd` only and stays put at the edge — it does not write to the daemon socket.
 
 **Fallback:** if daemon socket is missing, `omarchy-movefocus-hypr` falls back to `omarchy_kitty.py` directly.
 
 ## Modifier layers
 
 ```
-$OMARKIT_MOD  = CTRL          # layer 1 — base
-$OMARKIT_MOD2 = SHIFT         # layer 2 — move
-$OMARKIT_MOD3 = ALT           # layer 3 — resize
+$OMARKIT_MOD  = SUPER         # layer 1 — base focus
+$OMARKIT_MOD2 = ALT           # layer 2 — move
 
 MOD              + dir  →  focus window
 MOD + MOD2       + dir  →  move window
-MOD + MOD3       + dir  →  resize window
+CTRL + ALT       + dir  →  resize window
 ```
 
-All three layers share `$OMARKIT_LEFT/DOWN/UP/RIGHT` — one set of direction keys drives every action.
+The focus and move layers share `$OMARKIT_LEFT/DOWN/UP/RIGHT` — one set of direction keys drives every action.
 
 ## Tasks
 
@@ -56,7 +56,7 @@ All three layers share `$OMARKIT_LEFT/DOWN/UP/RIGHT` — one set of direction ke
   - [x] Kittens: `smart_close.py`, `relative_resize.py`, `omarchy_kitty.py` owned by plugin
   - [x] Replace smart-splits `move_cursor_*` with native `wincmd`
   - [x] Replace smart-splits `resize_*` with `wincmd`
-  - [x] nvim edge writes direction to daemon socket via `vim.uv`
+  - [x] nvim navigates/resizes its own splits with `wincmd`; stays put at the edge (no daemon dispatch)
 - Bin
   - [x] `omarchy-kitty` smart launcher (moved into plugin, install symlinks)
   - [x] `omarchy-movefocus-hypr` (writes to daemon socket, falls back to `omarchy_kitty.py`)
@@ -64,7 +64,7 @@ All three layers share `$OMARKIT_LEFT/DOWN/UP/RIGHT` — one set of direction ke
 - Daemon
   - [x] Socket listener → IS_NVIM → split → tab → hyprctl
   - [x] `exec-once = omarchy-nav-daemon` in `autostart.conf`
-  - [x] Single-direction protocol for nvim edge
+  - [x] Resize protocol (`resize <direction> <pid>`) from Hyprland binding
 - Cleanup (omarchy repo)
   - [ ] Remove omarkit bindings from `config/hypr/bindings.conf` (owned by `omarkit-bindings.conf`)
   - [ ] Remove omarkit vars from `config/hypr/envs.conf` (written by install, not committed)

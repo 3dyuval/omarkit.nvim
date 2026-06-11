@@ -15,51 +15,13 @@ local function set_is_nvim(value)
   io.flush()
 end
 
-local SOCK_PATH = (os.getenv('XDG_RUNTIME_DIR') or ('/run/user/' .. vim.fn.getuid())) .. '/omarchy-nav.sock'
-
---- Kitty OS-window PID from $KITTY_LISTEN_ON (e.g. "unix:@mykitty-12345"), or nil.
-local KITTY_PID = (os.getenv('KITTY_LISTEN_ON') or ''):match('%-(%d+)$')
-
---- Send a message to the daemon socket (async, fire-and-forget).
-local function dispatch_msg(msg, hypr_fallback_args)
-  local pipe = vim.uv.new_pipe(false)
-  pipe:connect(SOCK_PATH, function(err)
-    if err then
-      vim.schedule(function() vim.fn.jobstart(hypr_fallback_args) end)
-    else
-      pipe:write(msg .. '\n', function() pipe:close() end)
-    end
-  end)
-end
-
---- Write direction to daemon socket (async, fire-and-forget).
---- Sends "direction pid" so daemon runs full dispatch() including kitty layer.
---- Falls back to hyprctl if socket is unavailable.
-local function dispatch_edge(direction)
-  local msg = KITTY_PID and ('edge ' .. direction .. ' ' .. KITTY_PID) or direction
-  dispatch_msg(msg, { 'hyprctl', 'dispatch', 'movefocus', direction })
-end
-
-local function dispatch_resize_edge(direction)
-  local msg = KITTY_PID and ('resize_edge ' .. direction .. ' ' .. KITTY_PID) or ('resize ' .. direction)
-  dispatch_msg(msg, { 'hyprctl', 'dispatch', 'resizeactive',
-    direction == 'left' and '-50' or direction == 'right' and '50' or '0',
-    direction == 'up'   and '-50' or direction == 'down'  and '50' or '0' })
-end
-
---- Navigate in direction via wincmd; dispatch to daemon at nvim split edge.
-local function nav(wincmd_dir, hypr_dir)
+--- Navigate in direction via wincmd; stay put at nvim split edge (Ctrl never leaves nvim).
+local function nav(wincmd_dir)
   return function()
-    local win = vim.api.nvim_get_current_win()
-    local config = vim.api.nvim_win_get_config(win)
-    if config.relative ~= '' then
-      dispatch_edge(hypr_dir)
+    if vim.api.nvim_win_get_config(vim.api.nvim_get_current_win()).relative ~= '' then
       return
     end
     vim.cmd('wincmd ' .. wincmd_dir)
-    if vim.api.nvim_get_current_win() == win then
-      dispatch_edge(hypr_dir)
-    end
   end
 end
 
@@ -84,21 +46,21 @@ end
 function M.register_keymaps()
   local keys = require('omarkit.config').keys
   local nav_specs = {
-    { keys.nav_left,  'h', 'left',  'Window left' },
-    { keys.nav_down,  'j', 'down',  'Window down' },
-    { keys.nav_up,    'k', 'up',    'Window up' },
-    { keys.nav_right, 'l', 'right', 'Window right' },
+    { keys.nav_left,  'h', 'Window left' },
+    { keys.nav_down,  'j', 'Window down' },
+    { keys.nav_up,    'k', 'Window up' },
+    { keys.nav_right, 'l', 'Window right' },
   }
 
   -- Apply nav keymaps to a buffer (nil = global). Re-applied on BufEnter so
   -- buffer-local keymaps set by plugins (snacks, avante, etc.) don't shadow them.
   local function apply_nav(buf)
     for _, spec in ipairs(nav_specs) do
-      local fn = nav(spec[2], spec[3])
+      local fn = nav(spec[2])
       for _, lhs in ipairs(to_list(spec[1])) do
-        vim.keymap.set('n', lhs, fn, { noremap = true, desc = spec[4], buffer = buf })
+        vim.keymap.set('n', lhs, fn, { noremap = true, desc = spec[3], buffer = buf })
         if not buf then
-          vim.keymap.set('t', lhs, '<C-\\><C-n>' .. lhs, { noremap = true, desc = spec[4] })
+          vim.keymap.set('t', lhs, '<C-\\><C-n>' .. lhs, { noremap = true, desc = spec[3] })
         end
       end
     end
@@ -112,20 +74,18 @@ function M.register_keymaps()
 
   -- winnr_dir: direction to check for a neighbor before resizing
   -- wincmd:    resize command when neighbor exists
-  -- hypr_dir:  direction sent to daemon when at nvim edge
+  -- Resizes nvim splits only; stays put at the nvim edge (no neighbor).
   local resize_specs = {
-    { keys.resize_left,  'h', '<', 'left',  'Resize left' },
-    { keys.resize_down,  'j', '+', 'down',  'Resize down' },
-    { keys.resize_up,    'k', '-', 'up',    'Resize up' },
-    { keys.resize_right, 'l', '>', 'right', 'Resize right' },
+    { keys.resize_left,  'h', '<', 'Resize left' },
+    { keys.resize_down,  'j', '+', 'Resize down' },
+    { keys.resize_up,    'k', '-', 'Resize up' },
+    { keys.resize_right, 'l', '>', 'Resize right' },
   }
   for _, spec in ipairs(resize_specs) do
-    local winnr_dir, wincmd, hypr_dir, desc = spec[2], spec[3], spec[4], spec[5]
+    local winnr_dir, wincmd, desc = spec[2], spec[3], spec[4]
     for _, lhs in ipairs(to_list(spec[1])) do
       vim.keymap.set('n', lhs, function()
-        if vim.fn.winnr(winnr_dir) == vim.fn.winnr() then
-          dispatch_resize_edge(hypr_dir)
-        else
+        if vim.fn.winnr(winnr_dir) ~= vim.fn.winnr() then
           vim.cmd('5 wincmd ' .. wincmd)
         end
       end, { noremap = true, desc = desc })

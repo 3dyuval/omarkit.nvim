@@ -11,18 +11,18 @@ Navigation proceeds through layers in order until a move succeeds:
 ### Layer 1: Neovim Splits
 **Scope:** Within a single Neovim instance
 **Keys:** `ctrl+h/a/e/i`
-**Behavior:** Move between vim windows using wincmd
+**Behavior:** Move between vim windows using wincmd. Stays put at the nvim edge — does not continue to Layer 2.
 
 ### Layer 2: Kitty Splits
 **Scope:** Within a single Kitty OS window
-**Keys:** `ctrl+h/a/e/i` (from nvim edge) OR `super+h/a/e/i`
+**Keys:** `super+h/a/e/i`
 **Behavior:**
 - Spatial neighbor detection (geometry-based, 2px tolerance)
 - Fallback to window list order if no spatial neighbor
 
 ### Layer 3: Hyprland Groups
 **Scope:** Within a grouped set of Hyprland windows
-**Keys:** `ctrl+h/a/e/i` (continues from Layer 2)
+**Keys:** `super+h/a/e/i` (continues from Layer 2)
 **Behavior:**
 - If window is in a group: `changegroupactive`
 - Direction mapping: left/up → backward, right/down → forward
@@ -30,12 +30,12 @@ Navigation proceeds through layers in order until a move succeeds:
 
 ### Layer 4: Hyprland Windows
 **Scope:** Between independent Hyprland windows
-**Keys:** `ctrl+h/a/e/i` (final fallback)
+**Keys:** `super+h/a/e/i` (final fallback)
 **Behavior:** `hyprctl dispatch movefocus`
 
 ## Bypass Mode
 
-**Keys:** `ctrl+shift+h/a/e/i`
+**Keys:** `super+shift+h/a/e/i`
 **Behavior:** Skip Layer 3 (groups), go directly from kitty splits to Hyprland windows
 
 ## Direction Mapping
@@ -54,7 +54,7 @@ Navigation proceeds through layers in order until a move succeeds:
 
 ### From Neovim
 **Keys:** `ctrl+h/a/e/i`
-**Path:** nvim lua → socket message → daemon
+**Path:** nvim lua → wincmd (local only; stays put at edge, no daemon)
 
 ### From Kitty (non-nvim)
 **Question:** Use `ctrl+h/a/e/i` or `super+h/a/e/i`?
@@ -72,7 +72,6 @@ Implements all navigation and resize layers
 Receives:
 - `"{direction} {pid} [--bypass-groups]"` - navigation
 - `"resize {direction} {pid}"` - resize from Hyprland
-- `"resize_edge {direction} {pid}"` - resize from nvim edge
 
 ### omarchy-movefocus-hypr
 Entry script from Hyprland bindings
@@ -83,7 +82,7 @@ Accepts: `--resize` flag
 Lua plugin implementing Layer 1 for both navigation and resize
 - Navigation: `ctrl+h/a/e/i`
 - Resize: `ctrl+alt+h/a/e/i`
-Sends edge messages to daemon socket
+Local-only (wincmd); stays put at the nvim edge, never dispatches to the daemon
 
 ### kitty omarchy_kitty.py
 Fallback when daemon unavailable
@@ -99,26 +98,26 @@ Resize proceeds through layers in order until a resize succeeds:
 **Behavior:**
 - Check for neighbor in key direction using `winnr()`
 - If neighbor exists: execute `wincmd </>/-/+`
-- If no neighbor: proceed to Layer 2
+- If no neighbor: stays put (does not continue to Layer 2)
 
 **Resize semantics:** "Pressing direction `d` = contracting to the `d` direction"
 
 | Key | Neighbor exists? | Action |
 |-----|-----------------|--------|
 | h (left) | yes | `wincmd <` - contract left (right border moves left) |
-| h (left) | no | → Layer 2 |
+| h (left) | no | stays put |
 | i (right) | yes | `wincmd >` - contract right (right border moves right) |
-| i (right) | no | → Layer 2 |
+| i (right) | no | stays put |
 | e (up) | yes | `wincmd -` - contract up (bottom border moves up) |
-| e (up) | no | → Layer 2 |
+| e (up) | no | stays put |
 | a (down) | yes | `wincmd +` - contract down (bottom border moves down) |
-| a (down) | no | → Layer 2 |
+| a (down) | no | stays put |
 
 **Limitation:** Nvim's `wincmd` only moves RIGHT/BOTTOM borders. Cannot directly pull LEFT/TOP borders.
 
 ### Layer 2: Kitty Splits
 **Scope:** Within a single Kitty OS window
-**Keys:** `ctrl+alt+h/a/e/i` (from nvim edge) OR `super+alt+h/a/e/i`
+**Keys:** `ctrl+alt+h/a/e/i`
 **Behavior:**
 - Detect neighbor in key direction using geometry (2px tolerance)
 - If neighbor exists: `kitten @ resize-window --increment +5` (always grow)
@@ -172,11 +171,10 @@ Resize proceeds through layers in order until a resize succeeds:
 
 | Operation | Keys | Scope | Layers |
 |-----------|------|-------|--------|
-| Navigation | `ctrl+h/a/e/i` | nvim → kitty → groups → hyprland | 1-4 |
+| Navigation | `ctrl+h/a/e/i` | nvim (stays put at edge) | 1 |
 | Navigation | `super+h/a/e/i` | kitty → groups → hyprland | 2-4 |
-| Navigation (bypass) | `ctrl+shift+h/a/e/i` | nvim → kitty → hyprland (skip groups) | 1,2,4 |
+| Navigation (bypass) | `super+shift+h/a/e/i` | kitty → hyprland (skip groups) | 2,4 |
 | Resize | `ctrl+alt+h/a/e/i` | nvim → kitty → hyprland | 1-3 |
-| Resize | `super+alt+h/a/e/i` | kitty → hyprland | 2-3 |
 
 **Direction mapping:**
 - `h` = left

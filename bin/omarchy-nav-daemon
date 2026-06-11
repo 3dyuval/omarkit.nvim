@@ -30,7 +30,6 @@ SOCK_PATH = os.path.join(
 
 HYPR_DIR  = {'left': 'l', 'right': 'r', 'up': 'u', 'down': 'd'}
 KITTY_DIR = {'left': 'left', 'right': 'right', 'up': 'top', 'down': 'bottom'}
-KITTY_KEY = {'left': 'ctrl+h', 'right': 'ctrl+i', 'up': 'ctrl+e', 'down': 'ctrl+a'}
 
 KITTY_RESIZE_KEY  = {'left': 'ctrl+alt+h', 'right': 'ctrl+alt+i', 'up': 'ctrl+alt+e', 'down': 'ctrl+alt+a'}
 KITTY_RESIZE_AXIS = {'left': 'horizontal', 'right': 'horizontal', 'up': 'vertical', 'down': 'vertical'}
@@ -138,38 +137,9 @@ def _kitty_nav(sock_addr, direction, os_win):
 
 
 def dispatch(direction, pid):
-    sock_addr = f'unix:@mykitty-{pid}'
-
-    state = kitty_ls(sock_addr)
-    if state is None:
-        hyprctl(direction)
-        return
-
-    os_win = next((w for w in state if w.get('is_focused')), None)
-    if not os_win:
-        hyprctl(direction)
-        return
-
-    tab = next((t for t in os_win['tabs'] if t.get('is_active')), None)
-    if not tab:
-        hyprctl(direction)
-        return
-
-    win = next((w for w in tab['windows'] if w.get('is_active') and w.get('is_focused')), None)
-
-    # IS_NVIM: pass key through to nvim (smart-splits handles intra-nvim nav)
-    is_nvim = win and win.get('user_vars', {}).get('IS_NVIM')
-    if is_nvim:
-        kitty_run(sock_addr, 'send-key', KITTY_KEY[direction])
-        return
-
-    _kitty_nav(sock_addr, direction, os_win)
-
-
-
-def dispatch_from_edge(direction, pid):
-    """Called when nvim has already handled navigation and hit its edge.
-    Skips the IS_NVIM send-key to avoid an infinite loop."""
+    """From Hyprland (Super). Navigate around the focused window — kitty split →
+    tab → hyprland. Never sends keys into nvim: Super moves past nvim, Ctrl moves
+    inside it."""
     sock_addr = f'unix:@mykitty-{pid}'
 
     state = kitty_ls(sock_addr)
@@ -223,35 +193,6 @@ def dispatch_resize(direction, pid):
         hypr_resize(direction)
 
 
-def dispatch_resize_edge(direction, pid):
-    """From nvim at its split edge — skip IS_NVIM, resize kitty split or hyprland window."""
-    log(f'dispatch_resize_edge dir={direction} pid={pid}')
-    sock_addr = f'unix:@mykitty-{pid}'
-
-    state = kitty_ls(sock_addr)
-    if state is None:
-        log('  kitty_ls failed → hypr_resize')
-        hypr_resize(direction)
-        return
-
-    os_win = next((w for w in state if w.get('is_focused')), None)
-    if not os_win:
-        log('  no focused os_win → hypr_resize')
-        hypr_resize(direction)
-        return
-
-    tab = next((t for t in os_win['tabs'] if t.get('is_active')), None)
-    if tab:
-        windows = tab.get('windows', [])
-        active_win = next((w for w in windows if w.get('is_active')), None)
-        log(f'  active_win={active_win["id"] if active_win else None} windows={[w["id"] for w in windows]}')
-        if active_win and kitty_neighbor_in_dir(windows, active_win, direction):
-            kitty_resize_window(sock_addr, direction)
-            return
-    log('  no kitty neighbor → hypr_resize')
-    hypr_resize(direction)
-
-
 def serve():
     try:
         os.unlink(SOCK_PATH)
@@ -280,12 +221,8 @@ def serve():
             parts = data.split()
             if len(parts) == 2 and parts[0] in HYPR_DIR:
                 dispatch(parts[0], parts[1])                          # nav from hyprland
-            elif len(parts) == 3 and parts[0] == 'edge' and parts[1] in HYPR_DIR:
-                dispatch_from_edge(parts[1], parts[2])                # nav from nvim edge
             elif len(parts) == 3 and parts[0] == 'resize' and parts[1] in HYPR_DIR:
                 dispatch_resize(parts[1], parts[2])                   # resize from hyprland
-            elif len(parts) == 3 and parts[0] == 'resize_edge' and parts[1] in HYPR_DIR:
-                dispatch_resize_edge(parts[1], parts[2])              # resize from nvim edge
             elif len(parts) == 1 and parts[0] in HYPR_DIR:
                 hyprctl(parts[0])                                      # nav fallback (no pid)
         except Exception:

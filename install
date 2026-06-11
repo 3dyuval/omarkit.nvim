@@ -87,11 +87,11 @@ bindd = $MOD $MOD2, $DOWN,  Move window down,  movewindow, d
 bindd = $MOD $MOD2, $UP,    Move window up,    movewindow, u
 bindd = $MOD $MOD2, $RIGHT, Move window right, movewindow, r
 
-# MOD + CTRL + ALT + dir => Resize window (routed via daemon: nvim splits → kitty splits → hyprland)
-bindd = $MOD CTRL ALT, $LEFT,  Resize window left,  exec, omarchy-movefocus-hypr --resize left
-bindd = $MOD CTRL ALT, $DOWN,  Resize window down,  exec, omarchy-movefocus-hypr --resize down
-bindd = $MOD CTRL ALT, $UP,    Resize window up,    exec, omarchy-movefocus-hypr --resize up
-bindd = $MOD CTRL ALT, $RIGHT, Resize window right, exec, omarchy-movefocus-hypr --resize right
+# CTRL + ALT + dir => Resize window (routed via daemon: kitty splits → hyprland; captured by nvim when focused)
+bindd = CTRL ALT, $LEFT,  Resize window left,  exec, omarchy-movefocus-hypr --resize left
+bindd = CTRL ALT, $DOWN,  Resize window down,  exec, omarchy-movefocus-hypr --resize down
+bindd = CTRL ALT, $UP,    Resize window up,    exec, omarchy-movefocus-hypr --resize up
+bindd = CTRL ALT, $RIGHT, Resize window right, exec, omarchy-movefocus-hypr --resize right
 HYPR
   echo "  wrote $HYPR_BINDINGS"
 }
